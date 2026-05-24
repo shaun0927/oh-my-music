@@ -59,7 +59,12 @@ pub enum SourceAssetRef {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum GeneratedEngine {
     Glicol,
-    Other { label: String },
+    /// Internal note-event sequencer driving polyphonic SynthVoice
+    /// instances. Added in Phase 2b.
+    Sequencer,
+    Other {
+        label: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
