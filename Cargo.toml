@@ -2,6 +2,7 @@
 members = [
   "crates/omm-audio",
   "crates/omm-engine",
+  "crates/omm-music",
   "crates/omm-protocol",
 ]
 resolver = "2"
