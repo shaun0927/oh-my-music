@@ -1,6 +1,7 @@
 import type { EngineClient } from "../engine-client";
 import { createPatternTool } from "./tools/glicol";
 import { setEnergyTool, setMoodTool } from "./tools/energy";
+import { theoryTools } from "./tools/theory";
 import { emergencyFadeTool, resetMixTool } from "./tools/utility";
 
 export function musicTools(engineClient: EngineClient) {
@@ -10,5 +11,6 @@ export function musicTools(engineClient: EngineClient) {
     createPatternTool(engineClient),
     emergencyFadeTool(engineClient),
     resetMixTool(engineClient),
+    ...theoryTools(),
   ];
 }
