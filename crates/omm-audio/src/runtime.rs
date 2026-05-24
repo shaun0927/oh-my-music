@@ -577,6 +577,36 @@ impl AudioRuntime {
             .schedule(request, self.rendered_frames, self.sample_rate)
     }
 
+    /// Schedule an RT command using a musical-time trigger (or
+    /// musical-bar/beat quantizer). The runtime resolves the trigger
+    /// into an absolute engine frame using its own `transport` and
+    /// `transport_start_frame`, then dispatches to
+    /// [`AudioRuntime::schedule_rt_command`]. Lead-time guard for
+    /// planned origins still applies to the resolved frame.
+    ///
+    /// Control-side only.
+    pub fn schedule_rt_command_at(
+        &mut self,
+        action_id: omm_protocol::ScheduledActionId,
+        origin: omm_protocol::ActionOrigin,
+        trigger: omm_protocol::ScheduleTrigger,
+        command: crate::RtCommand,
+    ) -> Result<(), RtCommandSchedulerError> {
+        let trigger_frame = omm_protocol::resolve_trigger(
+            trigger,
+            self.transport,
+            self.rendered_frames,
+            self.transport_start_frame,
+            self.sample_rate,
+        );
+        self.schedule_rt_command(RtCommandScheduleRequest {
+            action_id,
+            origin,
+            trigger_frame,
+            command,
+        })
+    }
+
     /// Cancels a scheduled command from the non-render/control side.
     pub fn cancel_scheduled_rt_command(
         &mut self,
@@ -2779,6 +2809,72 @@ mod tests {
         // we expect bar 0 beat 1 tick 0.
         runtime.render_block(&mut buf);
         assert_eq!(runtime.current_musical_time(), MusicalTime::new(0, 1, 0));
+    }
+
+    #[test]
+    fn schedule_rt_command_at_resolves_relative_musical_using_transport() {
+        let (mut runtime, _q, _h) = AudioRuntime::new(AudioRuntimeConfig {
+            sample_rate: SAMPLE_RATE,
+            ..Default::default()
+        });
+        // PlannedLlm at 16 bars (32s @ 120 BPM 4-4) — passes lead-time.
+        let res = runtime.schedule_rt_command_at(
+            omm_protocol::ScheduledActionId::new("musical-trigger-ok"),
+            omm_protocol::ActionOrigin::PlannedLlm,
+            omm_protocol::ScheduleTrigger::RelativeMusical { bars: 16, beats: 0 },
+            crate::RtCommand::SetMasterGainDb {
+                db: -3.0,
+                ramp_frames: 0,
+            },
+        );
+        assert!(res.is_ok(), "16-bar trigger must satisfy lead-time guard");
+        assert_eq!(runtime.scheduled_rt_command_count(), 1);
+    }
+
+    #[test]
+    fn schedule_rt_command_at_planned_next_bar_inside_lead_time_is_rejected() {
+        let (mut runtime, _q, _h) = AudioRuntime::new(AudioRuntimeConfig {
+            sample_rate: SAMPLE_RATE,
+            ..Default::default()
+        });
+        // PlannedLlm + NextBarBoundary at engine_now=0 → 96000 frames =
+        // 2s ahead, well under the 30s lead-time minimum → must reject.
+        let res = runtime.schedule_rt_command_at(
+            omm_protocol::ScheduledActionId::new("next-bar-too-soon"),
+            omm_protocol::ActionOrigin::PlannedLlm,
+            omm_protocol::ScheduleTrigger::NextBarBoundary,
+            crate::RtCommand::SetMasterGainDb {
+                db: -3.0,
+                ramp_frames: 0,
+            },
+        );
+        assert!(matches!(
+            res,
+            Err(RtCommandSchedulerError::Validation(
+                omm_protocol::ScheduleValidationError::PlannedActionTooSoon { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn schedule_rt_command_at_manual_next_bar_accepted_immediately() {
+        let (mut runtime, _q, _h) = AudioRuntime::new(AudioRuntimeConfig {
+            sample_rate: SAMPLE_RATE,
+            ..Default::default()
+        });
+        let res = runtime.schedule_rt_command_at(
+            omm_protocol::ScheduledActionId::new("manual-next-bar"),
+            omm_protocol::ActionOrigin::Manual,
+            omm_protocol::ScheduleTrigger::NextBarBoundary,
+            crate::RtCommand::SetMasterGainDb {
+                db: -3.0,
+                ramp_frames: 0,
+            },
+        );
+        assert!(
+            res.is_ok(),
+            "Manual origin bypasses lead-time guard: {res:?}"
+        );
     }
 
     #[test]
