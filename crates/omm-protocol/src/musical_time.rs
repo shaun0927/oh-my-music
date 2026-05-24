@@ -59,7 +59,10 @@ impl Default for TimeSignature {
 /// the active `TimeSignature`. Construct values via
 /// [`MusicalTime::from_total_ticks`] when you have a tick count and want
 /// the bar/beat decomposition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Order: lexicographic by `(bar, beat, tick)`. The derive on
+/// `PartialOrd` / `Ord` gives the musically meaningful comparison
+/// because the struct fields are listed in coarse-to-fine order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct MusicalTime {
     pub bar: u32,
     pub beat: u16,
@@ -117,6 +120,9 @@ impl Default for MusicalTime {
 pub struct Transport {
     pub bpm: f32,
     pub time_signature: TimeSignature,
+    /// Stored for future use; the conversion functions in this module
+    /// do NOT apply swing. Downstream consumers (sequencers, quantizers
+    /// in later phases) may interpret it.
     pub swing: f32,
 }
 
@@ -160,6 +166,12 @@ fn ticks_to_frames(total_ticks: u64, transport: Transport, sample_rate: u32) -> 
 }
 
 /// Convert a frame count into a total tick count at the given transport.
+///
+/// Uses `floor` (not `round`) so that the reported musical position is
+/// never ahead of the actual frame — i.e. `frame_to_musical_time` never
+/// overshoots a tick that the engine has not yet reached. This matters
+/// for downstream scheduling (Phase 1c) where a "what musical time are
+/// we at?" query must not trigger an action one tick early.
 #[inline]
 fn frames_to_ticks(frames: u64, transport: Transport, sample_rate: u32) -> u64 {
     if transport.bpm <= 0.0 || sample_rate == 0 {
@@ -169,7 +181,7 @@ fn frames_to_ticks(frames: u64, transport: Transport, sample_rate: u32) -> u64 {
     if fpt <= 0.0 {
         return 0;
     }
-    (frames as f64 / fpt).round() as u64
+    (frames as f64 / fpt).floor() as u64
 }
 
 /// Convert a `MusicalTime` into an absolute engine frame, where `origin_frame`
