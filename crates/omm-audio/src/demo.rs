@@ -98,6 +98,7 @@ pub fn run_timeline_dj_demo(
 
     let (mut runtime, mut queue, _features) = AudioRuntime::new(AudioRuntimeConfig {
         sample_rate: config.sample_rate,
+        ..Default::default()
     });
 
     let deck_a = SourceInstanceId::new(DECK_A_ID);
