@@ -92,12 +92,23 @@ impl AdsrEnvelope {
     }
 
     pub fn release(&mut self) {
-        if self.stage != AdsrStage::Idle {
-            self.stage = AdsrStage::Release;
-            let samples = (self.release_ms * 0.001 * self.sample_rate as f32).max(1.0);
-            // Fixed linear step from the current level down to 0.
-            self.release_step = (self.level / samples).max(DENORMAL_THRESHOLD);
+        if self.stage == AdsrStage::Idle {
+            return;
         }
+        // Defensive: if the envelope is already at (or below) zero — e.g.
+        // a Sustain stage with sustain_level == 0.0 — skip Release entirely
+        // and go straight to Idle. Otherwise we would compute a positive
+        // release_step from zero and slide into negative territory before
+        // the level <= DENORMAL_THRESHOLD exit condition catches it.
+        if self.level <= DENORMAL_THRESHOLD {
+            self.level = 0.0;
+            self.stage = AdsrStage::Idle;
+            return;
+        }
+        self.stage = AdsrStage::Release;
+        let samples = (self.release_ms * 0.001 * self.sample_rate as f32).max(1.0);
+        // Fixed linear step from the current level down to 0.
+        self.release_step = (self.level / samples).max(DENORMAL_THRESHOLD);
     }
 
     pub fn is_active(&self) -> bool {
@@ -537,6 +548,45 @@ mod tests {
         for f in &buf {
             assert!(f.left == 0.0 || f.left.abs() >= DENORMAL_THRESHOLD);
         }
+    }
+
+    #[test]
+    fn release_on_zero_level_settles_to_idle_immediately() {
+        // sustain_level == 0 → level reaches 0 in Sustain stage.
+        // release() must short-circuit to Idle instead of computing a
+        // positive step from a zero level (which would drift negative).
+        let mut env = AdsrEnvelope::new(0.0, 1.0, 0.0, 50.0, SR);
+        env.trigger();
+        // Drive through Attack + Decay → Sustain at level 0.
+        for _ in 0..200 {
+            env.next_sample();
+        }
+        assert_eq!(env.stage(), AdsrStage::Sustain);
+        assert_eq!(env.level, 0.0);
+        env.release();
+        assert_eq!(env.stage(), AdsrStage::Idle, "must idle, not Release");
+    }
+
+    #[test]
+    fn re_trigger_during_release_starts_new_attack() {
+        // The sequencer (#6) re-uses voices: it calls note_on on a voice
+        // mid-release. This must restart the envelope as Attack and not
+        // be confused by the residual release_step from the prior note.
+        let mut voice = SineAdsrVoice::new(AdsrEnvelope::new(2.0, 5.0, 0.7, 100.0, SR), SR);
+        voice.note_on(60, 100);
+        let _ = fill(&mut voice, SR as usize / 20);
+        voice.note_off(60);
+        let _ = fill(&mut voice, SR as usize / 200); // partial release
+                                                     // Re-trigger with a different pitch.
+        voice.note_on(72, 120);
+        assert!(voice.is_active());
+        assert_eq!(voice.current_pitch(), Some(72));
+        let buf = fill(&mut voice, SR as usize / 10);
+        assert!(
+            peak(&buf) > 0.5,
+            "re-triggered note should produce audible signal, got {}",
+            peak(&buf)
+        );
     }
 
     #[test]
