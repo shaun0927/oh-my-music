@@ -8,7 +8,7 @@ pub mod source_timeline;
 pub mod validation;
 
 pub use envelope::{Envelope, MessagePriority, MessageSource};
-pub use messages::{EngineCommand, EngineEvent, OutputRoute, SessionMode};
+pub use messages::{EngineCommand, EngineEvent, OutputRoute, SessionMode, VoiceType};
 pub use musical_time::{
     frame_to_musical_time, musical_time_to_frame, quantize_to_next_bar, quantize_to_next_beat,
     MusicalTime, TimeSignature, Transport, TICKS_PER_QUARTER,

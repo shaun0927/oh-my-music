@@ -1,7 +1,18 @@
 use serde::{Deserialize, Serialize};
 
+use crate::musical_time::Transport;
+use crate::note_event::NoteEventBatch;
 use crate::params::{ParamId, RtTarget};
+use crate::scheduler::ScheduleTrigger;
 use crate::source_timeline::SourceTimelineSnapshot;
+
+/// Built-in voice flavors the agent can ask `CreateSequencerSource`
+/// for. Matches `omm_audio::source::synth::{SineAdsrVoice, SawAdsrVoice}`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum VoiceType {
+    SineAdsr,
+    SawAdsr,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SessionMode {
@@ -60,6 +71,35 @@ pub enum EngineCommand {
     EmergencyFade {
         fade_ms: u32,
         reason: String,
+    },
+    /// Replace the engine's master transport. Effective from the
+    /// current engine frame; `transport_start_frame` resets.
+    SetTransport {
+        transport: Transport,
+    },
+    /// Spin up a new sequencer-backed generated source with the
+    /// requested voice flavor and polyphony.
+    CreateSequencerSource {
+        source_instance_id: String,
+        voice_type: VoiceType,
+        polyphony: u8,
+    },
+    /// Stop and tear down a sequencer source (or any source instance).
+    RemoveSequencerSource {
+        source_instance_id: String,
+        fade_ms: u32,
+    },
+    /// Schedule a batch of notes against a sequencer source. The
+    /// trigger is resolved server-side using the master transport.
+    ScheduleNotes {
+        batch: NoteEventBatch,
+        trigger: ScheduleTrigger,
+    },
+    /// Cancel pending notes on a sequencer source. `from`, if set,
+    /// limits the clear to notes starting at or after that musical time.
+    ClearNotes {
+        source_instance_id: String,
+        from: Option<crate::musical_time::MusicalTime>,
     },
     RequestState,
 }

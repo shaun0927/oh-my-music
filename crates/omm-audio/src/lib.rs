@@ -2,6 +2,7 @@ pub mod channel;
 pub mod command;
 pub mod constants;
 pub mod demo;
+pub mod dispatch;
 pub mod dsp;
 pub mod features;
 pub mod frame;
