@@ -10,10 +10,12 @@ pub mod meter;
 pub mod mixer;
 pub mod note_queue;
 pub mod output;
+pub mod render;
 pub mod runtime;
 pub mod scheduler;
 pub mod source;
 pub mod understanding;
+pub mod verdict;
 
 pub use channel::ChannelStrip;
 pub use command::{
