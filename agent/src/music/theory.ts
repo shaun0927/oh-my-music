@@ -15,6 +15,56 @@ import type {
   Voicing,
 } from "./types";
 
+// -- Note ↔ engine NoteEvent adapter -------------------------------------
+
+const TICKS_PER_QUARTER = 480;
+
+/// JSON shape used by the engine's `omm-protocol::NoteEvent` (matches
+/// the schema the `schedule_notes` Pi tool emits). Kept here so callers
+/// who built a melody with `transposeNotes` / `humanizeNotes` can hand
+/// the result straight to `engineClient.scheduleNotes`.
+export interface EngineNoteEvent {
+  pitch_midi: number;
+  velocity: number;
+  start: { bar: number; beat: number; tick: number };
+  length_ticks: number;
+  channel: number;
+}
+
+/// Convert an in-crate `Note` (start/length in ticks-from-zero) to the
+/// engine's `NoteEvent` shape (start as MusicalTime under the given
+/// time signature). `beatsPerBar` and `ticksPerBeat` default to 4/4
+/// with PPQ 480 to match the engine's defaults.
+export function noteToEngineEvent(
+  note: Note,
+  channel = 0,
+  beatsPerBar = 4,
+  ticksPerBeat: number = TICKS_PER_QUARTER,
+): EngineNoteEvent {
+  const ticksPerBar = beatsPerBar * ticksPerBeat;
+  const bar = Math.floor(note.start_ticks / ticksPerBar);
+  const remBar = note.start_ticks - bar * ticksPerBar;
+  const beat = Math.floor(remBar / ticksPerBeat);
+  const tick = remBar - beat * ticksPerBeat;
+  return {
+    pitch_midi: note.pitch,
+    velocity: note.velocity,
+    start: { bar, beat, tick },
+    length_ticks: note.length_ticks,
+    channel,
+  };
+}
+
+/// Batch convert.
+export function notesToEngineEvents(
+  notes: Note[],
+  channel = 0,
+  beatsPerBar = 4,
+  ticksPerBeat: number = TICKS_PER_QUARTER,
+): EngineNoteEvent[] {
+  return notes.map((n) => noteToEngineEvent(n, channel, beatsPerBar, ticksPerBeat));
+}
+
 // -- Pitch ----------------------------------------------------------------
 
 export function clampPitch(midi: number): Pitch {

@@ -35,8 +35,14 @@ fn main() -> std::io::Result<()> {
         ("c_major_pop", scenario_c_major_pop as ScenarioFn),
         ("a_minor_dorian", scenario_a_minor_dorian as ScenarioFn),
         ("f_major_beat", scenario_f_major_beat as ScenarioFn),
-        ("e_phrygian_melody", scenario_e_phrygian_melody as ScenarioFn),
-        ("lead_time_violation", scenario_lead_time_violation as ScenarioFn),
+        (
+            "e_phrygian_melody",
+            scenario_e_phrygian_melody as ScenarioFn,
+        ),
+        (
+            "lead_time_violation",
+            scenario_lead_time_violation as ScenarioFn,
+        ),
     ];
 
     for (slug, scenario) in scenarios {
@@ -63,7 +69,9 @@ fn main() -> std::io::Result<()> {
     println!(
         "I5 done. Audition WAVs in /tmp/mock_llm_*.wav and confirm 4 of 5 are musically sane;"
     );
-    println!("the 5th scenario must print a clear lead-time guidance message instead of writing audio.");
+    println!(
+        "the 5th scenario must print a clear lead-time guidance message instead of writing audio."
+    );
     Ok(())
 }
 
@@ -176,7 +184,7 @@ fn scenario_a_minor_dorian() -> Result<Vec<StereoFrame>, String> {
         },
     ];
     pump(&mut rt, &mut reg, cmds).map_err(|e| e.to_string())?;
-    Ok(render(&mut rt, (SAMPLE_RATE as usize * 23) / 1)) // 8 bars @ 90bpm = ~21s; +2s tail
+    Ok(render(&mut rt, SAMPLE_RATE as usize * 23)) // 8 bars @ 90bpm = ~21s; +2s tail
 }
 
 // --- Scenario 3: F major 140 BPM beat + bassline, 16 bars --------------
@@ -244,7 +252,13 @@ fn scenario_e_phrygian_melody() -> Result<Vec<StereoFrame>, String> {
         }
         // E minor chord on each downbeat: E G B
         for pitch in [52_u8, 55, 59] {
-            chord_events.push(NoteEvent::new(pitch, 70, MusicalTime::new(bar, 0, 0), 1920, 0));
+            chord_events.push(NoteEvent::new(
+                pitch,
+                70,
+                MusicalTime::new(bar, 0, 0),
+                1920,
+                0,
+            ));
         }
     }
     let cmds = vec![

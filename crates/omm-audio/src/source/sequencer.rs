@@ -120,6 +120,32 @@ impl SequencerSource {
         self.voices.iter().filter(|v| v.voice.is_active()).count()
     }
 
+    /// Clear pending notes. If `from` is `Some`, only events whose
+    /// `start_frame` is at or after that musical-time threshold are
+    /// removed; if `None`, every pending note is dropped. Also issues
+    /// note_off to any currently active voice (the voice's release
+    /// envelope runs out naturally over the next blocks). Control-
+    /// side only — must not be called from the audio callback.
+    pub fn clear_pending(&mut self, from: Option<omm_protocol::MusicalTime>) {
+        if let Some(threshold) = from {
+            let threshold_frame =
+                musical_time_to_frame(threshold, self.transport, 0, self.sample_rate);
+            self.pending.retain(|p| p.start_frame < threshold_frame);
+        } else {
+            self.pending.clear();
+        }
+        // Release any currently sounding voice so the cleared section
+        // doesn't keep ringing through. The release envelope still
+        // plays out — callers that want hard cut can follow with
+        // SequencerSource::set_enabled(false) or stop_source_instance.
+        for slot in self.voices.iter_mut() {
+            if let Some(pitch) = slot.pitch {
+                slot.voice.note_off(pitch);
+            }
+            slot.release_at = None;
+        }
+    }
+
     /// Drain any newly-arrived NoteEvents into `pending`. Each event's
     /// musical-time `start` is resolved to an absolute engine frame
     /// using the active transport (relative to engine origin frame 0).
