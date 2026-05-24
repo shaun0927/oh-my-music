@@ -7,6 +7,7 @@ pub mod features;
 pub mod frame;
 pub mod meter;
 pub mod mixer;
+pub mod note_queue;
 pub mod output;
 pub mod runtime;
 pub mod scheduler;
