@@ -53,3 +53,35 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
+
+  rt-audit:
+    name: RT Audit
+    runs-on: ubuntu-latest
+    needs: [clippy]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # 5 ms budget — generous for shared GitHub runners. The local
+      # gate keeps the strict 3 ms default.
+      - run: RT_AUDIT_MAX_BLOCK_MS=5 cargo run --release --bin rt_audit
+
+  agentless-compose-smoke:
+    name: Agentless Compose Smoke
+    runs-on: ubuntu-latest
+    needs: [clippy]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo run -p omm-audio --example agentless_compose
+      - name: Upload WAV evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentless-compose-wav
+          path: /tmp/agentless_compose.wav
+          if-no-files-found: error
