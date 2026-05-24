@@ -10,7 +10,7 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/ino/oh-my-music"
+repository = "https://github.com/shaun0927/oh-my-music"
 rust-version = "1.80"
 
 [workspace.dependencies]

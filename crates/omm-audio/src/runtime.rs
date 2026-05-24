@@ -558,6 +558,22 @@ impl AudioRuntime {
         }
     }
 
+    /// Convenience: render `output` of any length by chunking into
+    /// `MAX_BLOCK_FRAMES`-sized blocks and calling [`render_block`]
+    /// repeatedly. Most callers (offline-render demos, integration
+    /// tests, future offline-render lane in Phase 6) want this; the
+    /// per-block primitive `render_block` keeps the strict
+    /// `output.len() <= MAX_BLOCK_FRAMES` contract for callers that
+    /// already chunk themselves (the live audio callback).
+    pub fn render(&mut self, output: &mut [StereoFrame]) {
+        let mut pos = 0;
+        while pos < output.len() {
+            let end = (pos + crate::constants::MAX_BLOCK_FRAMES).min(output.len());
+            self.render_block(&mut output[pos..end]);
+            pos = end;
+        }
+    }
+
     pub fn render_block(&mut self, output: &mut [StereoFrame]) {
         let drained_commands = self.drain_commands(MAX_DRAIN_PER_BLOCK);
         self.drain_scheduled_commands(MAX_DRAIN_PER_BLOCK.saturating_sub(drained_commands));
