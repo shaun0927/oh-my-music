@@ -72,7 +72,9 @@ pub trait SynthVoice: Send {
 3. **`current_pitch` returns `Option<u8>`.** `None` when the voice is
    idle. Lets the sequencer pick stealing victims without inspecting
    internal voice state. Voice stealing policy lives entirely in the
-   sequencer (see #6 issue body).
+   sequencer (see #6 issue body). The sequencer tracks per-voice note
+   age externally; the trait does not expose it, to keep the surface
+   minimal.
 
 4. **No per-voice gain, pan, or filter parameters.** Those belong to the
    `ChannelStrip` that the voice's output flows into. Keeping the voice
@@ -93,6 +95,8 @@ pub trait SynthVoice: Send {
    `note_on` and `note_off` are also called from the audio callback
    (driven by the sequencer's due-note pump) and share the same
    constraints. Constructors run off the audio thread and may allocate.
+   Constructors receive `sample_rate` and store it; the trait
+   intentionally excludes `sample_rate` from `render`.
 
 ## Consequences
 
