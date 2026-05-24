@@ -1,6 +1,7 @@
 pub mod envelope;
 pub mod messages;
 pub mod musical_time;
+pub mod note_event;
 pub mod params;
 pub mod scheduler;
 pub mod source_timeline;
@@ -12,6 +13,7 @@ pub use musical_time::{
     frame_to_musical_time, musical_time_to_frame, quantize_to_next_bar, quantize_to_next_beat,
     MusicalTime, TimeSignature, Transport, TICKS_PER_QUARTER,
 };
+pub use note_event::{NoteEvent, NoteEventBatch, NoteEventValidationError};
 pub use params::{ParamId, RtTarget};
 pub use scheduler::{
     frames_for_duration_ms, validate_schedule_request, ActionOrigin, EngineTime,
