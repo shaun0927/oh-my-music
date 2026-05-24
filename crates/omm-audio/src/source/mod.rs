@@ -2,12 +2,14 @@ pub mod glicol;
 pub mod mic;
 pub mod musical_test;
 pub mod player;
+pub mod synth;
 pub mod test_tone;
 
 pub use glicol::GlicolSource;
 pub use mic::{MicSource, MicSourceError};
 pub use musical_test::MusicalTestSource;
 pub use player::{PlayerSource, PlayerSourceError};
+pub use synth::{midi_to_freq_hz, AdsrEnvelope, SawAdsrVoice, SineAdsrVoice, SynthVoice};
 pub use test_tone::TestToneSource;
 
 use crate::frame::StereoFrame;
