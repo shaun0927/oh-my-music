@@ -173,6 +173,7 @@ mod tests {
     fn chunked_rendering_2048_frames() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: TARGET_SAMPLE_RATE,
+            ..Default::default()
         });
         assert!(runtime
             .add_source_instance(
@@ -227,6 +228,7 @@ mod tests {
     fn odd_length_buffer_silent_and_counter() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: TARGET_SAMPLE_RATE,
+            ..Default::default()
         });
         assert!(runtime
             .add_source_instance(
@@ -261,6 +263,7 @@ mod tests {
     fn empty_buffer_increments_counter() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: TARGET_SAMPLE_RATE,
+            ..Default::default()
         });
 
         let mut frames: Vec<StereoFrame> = Vec::with_capacity(MAX_BLOCK_FRAMES);
@@ -276,6 +279,7 @@ mod tests {
     fn well_formed_buffer_below_max_block_renders_in_single_chunk() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: TARGET_SAMPLE_RATE,
+            ..Default::default()
         });
         assert!(runtime
             .add_source_instance(
@@ -305,6 +309,7 @@ mod tests {
     fn cpal_output_new_succeeds_on_default_device() {
         let (runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: TARGET_SAMPLE_RATE,
+            ..Default::default()
         });
 
         if let Err(err) = CpalOutput::new(runtime) {

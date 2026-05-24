@@ -17,3 +17,7 @@
 # Local AI instructions (not committed)
 *.local.md
 *.local.ts
+
+# Local OMC/openchrome state — not committed
+.omc/
+.openchrome/

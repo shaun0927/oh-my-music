@@ -17,8 +17,9 @@ use crate::{
     RtCommandSchedulerError,
 };
 use omm_protocol::{
-    frames_for_duration_ms, ParamId, SourceAssetRef, SourceInstanceId, SourceKind,
-    SourceTimelinePlacement, SourceTimelineSnapshot, SourceTimelineValidationError,
+    frame_to_musical_time, frames_for_duration_ms, MusicalTime, ParamId, SourceAssetRef,
+    SourceInstanceId, SourceKind, SourceTimelinePlacement, SourceTimelineSnapshot,
+    SourceTimelineValidationError, Transport,
 };
 use ringbuf::traits::Split;
 use ringbuf::HeapRb;
@@ -84,6 +85,18 @@ enum SourceInstanceRtCommandError {
 #[derive(Debug, Clone, Copy)]
 pub struct AudioRuntimeConfig {
     pub sample_rate: u32,
+    /// Initial musical transport (BPM, time signature, swing). The
+    /// runtime owns this and updates it via [`AudioRuntime::set_transport`].
+    pub initial_transport: Transport,
+}
+
+impl Default for AudioRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            sample_rate: 48_000,
+            initial_transport: Transport::default(),
+        }
+    }
 }
 
 pub struct AudioRuntime {
@@ -100,6 +113,13 @@ pub struct AudioRuntime {
     feature_registry: FeatureRegistry,
     scheduler: RtCommandScheduler,
     rendered_frames: u64,
+    /// The current musical transport. Read-only on the audio thread;
+    /// updated via [`AudioRuntime::set_transport`] from the control side.
+    transport: Transport,
+    /// Engine frame at which the current `transport` started. Reset by
+    /// [`AudioRuntime::set_transport`] so musical time stays continuous
+    /// across BPM jumps.
+    transport_start_frame: u64,
     dropped_source_instance_rt_commands: u64,
     unsupported_source_instance_rt_commands: u64,
 }
@@ -125,12 +145,45 @@ impl AudioRuntime {
                 feature_registry,
                 scheduler: RtCommandScheduler::default(),
                 rendered_frames: 0,
+                transport: config.initial_transport,
+                transport_start_frame: 0,
                 dropped_source_instance_rt_commands: 0,
                 unsupported_source_instance_rt_commands: 0,
             },
             command_queue,
             analyzer,
         )
+    }
+
+    /// Replace the master musical transport. The new transport takes
+    /// effect from the current engine frame onward — `transport_start_frame`
+    /// is set to `rendered_frames` so musical position stays continuous
+    /// across a BPM jump. Control-side only; do NOT call from the audio
+    /// callback.
+    pub fn set_transport(&mut self, transport: Transport) {
+        self.transport = transport;
+        self.transport_start_frame = self.rendered_frames;
+    }
+
+    /// Current master musical transport.
+    pub fn transport(&self) -> Transport {
+        self.transport
+    }
+
+    /// Current musical position based on `rendered_frames`, the active
+    /// transport, and the frame at which that transport started.
+    pub fn current_musical_time(&self) -> MusicalTime {
+        frame_to_musical_time(
+            self.rendered_frames,
+            self.transport,
+            self.transport_start_frame,
+            self.sample_rate,
+        )
+    }
+
+    /// Engine frame at which the active transport started.
+    pub fn transport_start_frame(&self) -> u64 {
+        self.transport_start_frame
     }
 
     pub fn add_source_instance(
@@ -564,6 +617,8 @@ impl AudioRuntime {
         SourceTimelineSnapshot {
             engine_frame: self.rendered_frames,
             sample_rate: self.sample_rate,
+            transport: self.transport,
+            transport_start_frame: self.transport_start_frame,
             sources: self
                 .channels
                 .iter()
@@ -1143,6 +1198,7 @@ mod tests {
     fn runtime_with_loud_channels(source_ids: &[&str], value: f32) -> AudioRuntime {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         runtime.set_master_pan(-1.0, 0);
 
@@ -1163,6 +1219,7 @@ mod tests {
     fn add_source_instance_duplicate_id_rejected() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
 
         let first = runtime.add_source_instance(
@@ -1192,6 +1249,7 @@ mod tests {
     fn multiple_file_instances_can_share_the_same_asset_with_offsets() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         let bytes = stepped_wav();
         let first_id = SourceInstanceId::new("file:loop-a");
@@ -1243,6 +1301,7 @@ mod tests {
     fn duplicate_and_invalid_file_source_instances_are_rejected() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         let bytes = stepped_wav();
 
@@ -1265,6 +1324,7 @@ mod tests {
     fn file_instance_start_offset_must_be_inside_file_duration() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         let bytes = stepped_wav();
 
@@ -1289,6 +1349,7 @@ mod tests {
     fn file_instance_controls_update_effect_status_and_rendering() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         let id = SourceInstanceId::new("file:controlled");
         let bytes = sine_wav(2_000, 440.0);
@@ -1342,6 +1403,7 @@ mod tests {
     fn file_instance_stop_fades_then_reports_stopped() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         let id = SourceInstanceId::new("file:fade-stop");
         let bytes = sine_wav(2_000, 440.0);
@@ -1378,6 +1440,7 @@ mod tests {
     fn file_instance_eq_reverb_and_automation_update_status_and_audio() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         let id = SourceInstanceId::new("file:effects");
         let bytes = impulse_wav(2_000);
@@ -1426,6 +1489,7 @@ mod tests {
     fn independent_eq_band_automation_preserves_other_band_targets() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         let id = SourceInstanceId::new("file:eq-independent");
         let bytes = sine_wav(2_000, 440.0);
@@ -1472,6 +1536,7 @@ mod tests {
     fn non_finite_playback_rate_falls_back_to_normal_speed() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         let id = SourceInstanceId::new("file:nan-rate");
         let bytes = sine_wav(2_000, 440.0);
@@ -1503,6 +1568,7 @@ mod tests {
     fn file_instance_playback_rate_and_reverse_control_transport() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         let id = SourceInstanceId::new("file:transport-effects");
         let bytes = ramp_wav(12_000);
@@ -1553,6 +1619,7 @@ mod tests {
     fn scheduled_source_instance_effect_command_applies_at_engine_time() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         let id = SourceInstanceId::new("file:scheduled-effects");
         let bytes = sine_wav(2_000, 440.0);
@@ -1593,6 +1660,7 @@ mod tests {
     fn rt_source_instance_eq_and_reverb_values_are_sanitized() {
         let (mut runtime, mut queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         let id = SourceInstanceId::new("file:rt-sanitized");
         let bytes = sine_wav(2_000, 440.0);
@@ -1641,6 +1709,7 @@ mod tests {
     fn runtime_without_sources_renders_silence() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         let mut output = vec![StereoFrame::new(0.5, -0.5); FRAME_COUNT];
 
@@ -1660,6 +1729,7 @@ mod tests {
     fn runtime_with_test_tone_source_renders_nonzero_signal() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_glicol_channel(&mut runtime, Box::new(TestToneSource::new(440.0, 48000)));
         let mut output = vec![StereoFrame::SILENCE; FRAME_COUNT];
@@ -1674,6 +1744,7 @@ mod tests {
     fn runtime_master_gain_minus_sixty_is_nearly_silent() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         runtime.set_master_gain_db(-60.0, 0);
         add_glicol_channel(&mut runtime, Box::new(TestToneSource::new(440.0, 48000)));
@@ -1689,6 +1760,7 @@ mod tests {
     fn command_drain_master_gain() {
         let (mut runtime, mut queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_glicol_channel(
             &mut runtime,
@@ -1712,6 +1784,7 @@ mod tests {
     fn drain_max_per_block() {
         let (mut runtime, mut queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_glicol_channel(
             &mut runtime,
@@ -1753,6 +1826,7 @@ mod tests {
     fn immediate_and_scheduled_commands_share_one_render_budget() {
         let (mut runtime, mut queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_glicol_channel(
             &mut runtime,
@@ -1799,6 +1873,7 @@ mod tests {
     fn runtime_master_gain_zero_keeps_normal_amplitude() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         runtime.set_master_gain_db(0.0, 0);
         add_glicol_channel(&mut runtime, Box::new(TestToneSource::new(440.0, 48000)));
@@ -1814,6 +1889,7 @@ mod tests {
     fn runtime_master_gain_minus_6db_attenuates_input_by_half() {
         let (mut unity, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         unity.set_master_pan(-1.0, 0);
         add_glicol_channel(
@@ -1823,6 +1899,7 @@ mod tests {
 
         let (mut attenuated, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         attenuated.set_master_gain_db(-6.0, 0);
         attenuated.set_master_pan(-1.0, 0);
@@ -1891,6 +1968,7 @@ mod tests {
     fn runtime_output_is_always_clamped_to_unit_range() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_glicol_channel(&mut runtime, Box::new(TestToneSource::new(440.0, 48000)));
         let mut output = vec![StereoFrame::SILENCE; 256];
@@ -1904,6 +1982,7 @@ mod tests {
     fn runtime_limiter_clamps_excessive_source_signal() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_glicol_channel(&mut runtime, Box::new(LoudSource::new(10_000.0)));
         let mut output = vec![StereoFrame::SILENCE; 256];
@@ -1922,6 +2001,7 @@ mod tests {
     fn runtime_meters_return_latest_render_snapshot() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_glicol_channel(&mut runtime, Box::new(TestToneSource::new(440.0, 48000)));
         let mut output = vec![StereoFrame::SILENCE; 256];
@@ -1937,6 +2017,7 @@ mod tests {
     fn runtime_applies_due_scheduled_commands_on_engine_frame() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_player_channel(
             &mut runtime,
@@ -1974,6 +2055,7 @@ mod tests {
     fn runtime_exposes_non_render_scheduler_reclaim() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         runtime
             .schedule_rt_command(RtCommandScheduleRequest {
@@ -1998,6 +2080,7 @@ mod tests {
     fn runtime_rejects_planned_commands_inside_thirty_second_guard() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         let minimum = EngineTime::new(0, SAMPLE_RATE).frame_after_ms(30_000);
 
@@ -2031,6 +2114,7 @@ mod tests {
     fn runtime_reports_source_instances_in_timeline_snapshot() {
         let (mut runtime, mut queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_player_channel(
             &mut runtime,
@@ -2071,6 +2155,7 @@ mod tests {
     fn runtime_empty_output_slice_does_not_panic() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_glicol_channel(&mut runtime, Box::new(TestToneSource::new(440.0, 48000)));
         let mut output: Vec<StereoFrame> = Vec::new();
@@ -2084,6 +2169,7 @@ mod tests {
     fn render_block_no_alloc_in_steady_state() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_glicol_channel(
             &mut runtime,
@@ -2110,6 +2196,7 @@ mod tests {
 
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_glicol_channel(&mut runtime, Box::new(source));
         let mut output = vec![StereoFrame::SILENCE; 256];
@@ -2125,6 +2212,7 @@ mod tests {
     fn channel_command_gain() {
         let (mut unity, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         unity.set_master_pan(-1.0, 0);
         add_glicol_channel(
@@ -2134,6 +2222,7 @@ mod tests {
 
         let (mut attenuated, mut queue_att, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         attenuated.set_master_pan(-1.0, 0);
         add_glicol_channel(
@@ -2165,11 +2254,13 @@ mod tests {
     fn channel_command_pan() {
         let (mut center, _queue_center, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_player_channel(&mut center, Box::new(LoudSource::new(0.5)));
 
         let (mut hard_left, mut queue_left, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_player_channel(&mut hard_left, Box::new(LoudSource::new(0.5)));
 
@@ -2207,6 +2298,7 @@ mod tests {
     fn channel_command_unknown_source_ignored() {
         let (mut runtime, mut queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_glicol_channel(
             &mut runtime,
@@ -2235,6 +2327,7 @@ mod tests {
     fn source_instance_rt_command_failures_are_counted() {
         let (mut runtime, mut queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_glicol_channel(
             &mut runtime,
@@ -2269,6 +2362,7 @@ mod tests {
 
         let (mut runtime, _queue, mut handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_glicol_channel(
             &mut runtime,
@@ -2310,6 +2404,7 @@ mod tests {
 
         let (mut runtime, _queue, mut handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
         add_glicol_channel(
             &mut runtime,
@@ -2371,6 +2466,7 @@ mod tests {
 
         let (_runtime, _queue, handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
 
         let start = Instant::now();
@@ -2387,6 +2483,7 @@ mod tests {
     fn multi_file_instances_with_individual_effects_and_glicol() {
         let (mut runtime, mut queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
 
         let file_a_id = SourceInstanceId::new("file:track-a");
@@ -2532,6 +2629,7 @@ mod tests {
     fn multi_source_rt_effect_changes_apply_independently() {
         let (mut runtime, mut queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: SAMPLE_RATE,
+            ..Default::default()
         });
 
         let id_a = SourceInstanceId::new("file:rt-a");
@@ -2630,5 +2728,72 @@ mod tests {
 
         assert_all_in_unit_range(&output);
         assert!(peak(&output) > 0.01, "mixed output should be non-silent");
+    }
+
+    #[test]
+    fn runtime_default_transport_is_120bpm_4_4() {
+        let (runtime, _q, _h) = AudioRuntime::new(AudioRuntimeConfig {
+            sample_rate: SAMPLE_RATE,
+            ..Default::default()
+        });
+        let t = runtime.transport();
+        assert!((t.bpm - 120.0).abs() < f32::EPSILON);
+        assert_eq!(t.time_signature, omm_protocol::TimeSignature::FOUR_FOUR);
+        assert_eq!(runtime.current_musical_time(), MusicalTime::ZERO);
+        assert_eq!(runtime.transport_start_frame(), 0);
+    }
+
+    #[test]
+    fn current_musical_time_advances_with_rendered_frames_at_120bpm_4_4() {
+        let (mut runtime, _q, _h) = AudioRuntime::new(AudioRuntimeConfig {
+            sample_rate: SAMPLE_RATE,
+            ..Default::default()
+        });
+        // 1 second @ 120 BPM / 4-4 = bar 0 beat 2 tick 0.
+        let mut buf = vec![StereoFrame::SILENCE; SAMPLE_RATE as usize];
+        runtime.render_block(&mut buf);
+        assert_eq!(runtime.current_musical_time(), MusicalTime::new(0, 2, 0));
+        // 2 seconds → bar 1 beat 0 tick 0.
+        runtime.render_block(&mut buf);
+        assert_eq!(runtime.current_musical_time(), MusicalTime::new(1, 0, 0));
+    }
+
+    #[test]
+    fn set_transport_resets_start_frame_so_musical_time_is_continuous_across_bpm_jump() {
+        let (mut runtime, _q, _h) = AudioRuntime::new(AudioRuntimeConfig {
+            sample_rate: SAMPLE_RATE,
+            ..Default::default()
+        });
+        // Render 1 second @ 120 BPM (beat 2).
+        let mut buf = vec![StereoFrame::SILENCE; SAMPLE_RATE as usize];
+        runtime.render_block(&mut buf);
+        assert_eq!(runtime.current_musical_time(), MusicalTime::new(0, 2, 0));
+        // Jump to 60 BPM.
+        let new_transport =
+            omm_protocol::Transport::new(60.0, omm_protocol::TimeSignature::FOUR_FOUR);
+        runtime.set_transport(new_transport);
+        // transport_start_frame is now at the BPM-jump frame.
+        assert_eq!(runtime.transport_start_frame(), SAMPLE_RATE as u64);
+        // Render another 1 second @ 60 BPM (1 beat at 60 BPM = 1s).
+        // Musical time is reported relative to transport_start_frame, so
+        // we expect bar 0 beat 1 tick 0.
+        runtime.render_block(&mut buf);
+        assert_eq!(runtime.current_musical_time(), MusicalTime::new(0, 1, 0));
+    }
+
+    #[test]
+    fn source_timeline_snapshot_includes_transport() {
+        let custom = omm_protocol::Transport::new(140.0, omm_protocol::TimeSignature::FOUR_FOUR);
+        let (runtime, _q, _h) = AudioRuntime::new(AudioRuntimeConfig {
+            sample_rate: SAMPLE_RATE,
+            initial_transport: custom,
+        });
+        let snap = runtime.source_timeline_snapshot();
+        assert!((snap.transport.bpm - 140.0).abs() < f32::EPSILON);
+        assert_eq!(snap.transport_start_frame, 0);
+
+        let json = serde_json::to_string(&snap).unwrap();
+        let back: omm_protocol::SourceTimelineSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, snap);
     }
 }

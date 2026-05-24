@@ -486,6 +486,7 @@ mod tests {
     fn malformed_output_buffer_silences_and_counts() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: ENGINE_SAMPLE_RATE,
+            ..Default::default()
         });
         assert!(runtime
             .add_source_instance(
@@ -511,6 +512,7 @@ mod tests {
     fn output_callback_chunks_large_buffers() {
         let (mut runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: ENGINE_SAMPLE_RATE,
+            ..Default::default()
         });
         assert!(runtime
             .add_source_instance(
@@ -552,6 +554,7 @@ mod tests {
     fn stream_lifecycle() -> Result<(), CpalIoError> {
         let (runtime, _queue, _handle) = AudioRuntime::new(AudioRuntimeConfig {
             sample_rate: ENGINE_SAMPLE_RATE,
+            ..Default::default()
         });
 
         let io = CpalIo::with_config(runtime, None, CpalIoConfig::default())?;

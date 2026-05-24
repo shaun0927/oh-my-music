@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::musical_time::Transport;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(transparent)]
 pub struct SourceInstanceId(String);
@@ -256,6 +258,11 @@ impl TimelineSourceInstance {
 pub struct SourceTimelineSnapshot {
     pub engine_frame: u64,
     pub sample_rate: u32,
+    /// Master musical transport at the time the snapshot was taken.
+    pub transport: Transport,
+    /// Engine frame at which `transport` started — required to map
+    /// snapshot engine_frame back to a musical position.
+    pub transport_start_frame: u64,
     pub sources: Vec<TimelineSourceInstance>,
 }
 
@@ -389,6 +396,8 @@ mod tests {
         let snapshot = SourceTimelineSnapshot {
             engine_frame: 960_000,
             sample_rate: 48_000,
+            transport: Transport::default(),
+            transport_start_frame: 0,
             sources: vec![TimelineSourceInstance {
                 source_instance_id: SourceInstanceId::new("mic:default"),
                 source_kind: SourceKind::Mic,

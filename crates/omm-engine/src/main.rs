@@ -91,6 +91,7 @@ async fn run_test_tone() -> anyhow::Result<()> {
 
     let (mut runtime, _queue, _features) = AudioRuntime::new(AudioRuntimeConfig {
         sample_rate: SAMPLE_RATE,
+        ..Default::default()
     });
     let source = Box::new(MusicalTestSource::new(SAMPLE_RATE));
     add_glicol_source(&mut runtime, source)?;
@@ -114,6 +115,7 @@ async fn run_glicol(code: &str) -> anyhow::Result<()> {
 
     let (mut runtime, _queue, _features) = AudioRuntime::new(AudioRuntimeConfig {
         sample_rate: SAMPLE_RATE,
+        ..Default::default()
     });
     let mut source = GlicolSource::new(SAMPLE_RATE);
 
@@ -137,6 +139,7 @@ async fn run_mix_demo() -> anyhow::Result<()> {
 
     let (mut runtime, mut command_queue, mut features) = AudioRuntime::new(AudioRuntimeConfig {
         sample_rate: SAMPLE_RATE,
+        ..Default::default()
     });
 
     let mic_stream = build_mic_channel(&mut runtime);
@@ -257,6 +260,7 @@ async fn run_multi_demo() -> anyhow::Result<()> {
 
     let (mut runtime, mut command_queue, _features) = AudioRuntime::new(AudioRuntimeConfig {
         sample_rate: SAMPLE_RATE,
+        ..Default::default()
     });
 
     let mut glicol = GlicolSource::new(SAMPLE_RATE);
@@ -465,6 +469,7 @@ async fn run_mic_monitor() -> anyhow::Result<()> {
 
     let (mut runtime, mut command_queue, _features) = AudioRuntime::new(AudioRuntimeConfig {
         sample_rate: SAMPLE_RATE,
+        ..Default::default()
     });
     let mic_stream = build_mic_channel(&mut runtime);
 
