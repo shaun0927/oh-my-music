@@ -16,9 +16,9 @@ pub use musical_time::{
 pub use note_event::{NoteEvent, NoteEventBatch, NoteEventValidationError};
 pub use params::{ParamId, RtTarget};
 pub use scheduler::{
-    frames_for_duration_ms, validate_schedule_request, ActionOrigin, EngineTime,
-    ScheduleRequestTiming, ScheduleValidation, ScheduleValidationError, ScheduledActionId,
-    PLANNED_ACTION_MIN_LEAD_MS,
+    frames_for_duration_ms, resolve_trigger, validate_schedule_request, ActionOrigin, EngineTime,
+    ScheduleRequestTiming, ScheduleTrigger, ScheduleValidation, ScheduleValidationError,
+    ScheduledActionId, PLANNED_ACTION_MIN_LEAD_MS,
 };
 pub use source_timeline::{
     GeneratedEngine, PlaybackState, PlaybackStatusAuthority, SourceAssetRef, SourceEffectStatus,

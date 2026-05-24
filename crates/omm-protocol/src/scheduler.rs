@@ -1,6 +1,69 @@
 use serde::{Deserialize, Serialize};
 
+use crate::musical_time::{
+    musical_time_to_frame, quantize_to_next_bar, quantize_to_next_beat, MusicalTime, Transport,
+};
+
 pub const PLANNED_ACTION_MIN_LEAD_MS: u64 = 30_000;
+
+/// How a scheduling request expresses *when* the action should fire.
+///
+/// The control side normalizes this into an absolute engine frame via
+/// [`resolve_trigger`] using the runtime's current `Transport` and
+/// `transport_start_frame`. The scheduler itself only ever sees frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ScheduleTrigger {
+    /// Absolute engine frame. Original API.
+    Frame(u64),
+    /// Specific musical time relative to the transport.
+    MusicalTime(MusicalTime),
+    /// `bars` and `beats` after the current engine frame, using the
+    /// active transport's tempo.
+    RelativeMusical { bars: u32, beats: u16 },
+    /// The next bar boundary (or the current frame, if exactly on a
+    /// boundary).
+    NextBarBoundary,
+    /// The next beat boundary (or the current frame, if exactly on a
+    /// boundary).
+    NextBeatBoundary,
+}
+
+/// Convert a [`ScheduleTrigger`] into an absolute engine frame using
+/// the active transport and engine clock. Pure function — no scheduler
+/// or runtime state mutated. Safe to call from the control side.
+pub fn resolve_trigger(
+    trigger: ScheduleTrigger,
+    transport: Transport,
+    engine_now_frame: u64,
+    transport_start_frame: u64,
+    sample_rate: u32,
+) -> u64 {
+    match trigger {
+        ScheduleTrigger::Frame(f) => f,
+        ScheduleTrigger::MusicalTime(mt) => {
+            musical_time_to_frame(mt, transport, transport_start_frame, sample_rate)
+        }
+        ScheduleTrigger::RelativeMusical { bars, beats } => {
+            let mt = MusicalTime::new(bars, beats, 0);
+            let mt_frames =
+                musical_time_to_frame(mt, transport, transport_start_frame, sample_rate)
+                    .saturating_sub(transport_start_frame);
+            engine_now_frame.saturating_add(mt_frames)
+        }
+        ScheduleTrigger::NextBarBoundary => quantize_to_next_bar(
+            engine_now_frame,
+            transport,
+            transport_start_frame,
+            sample_rate,
+        ),
+        ScheduleTrigger::NextBeatBoundary => quantize_to_next_beat(
+            engine_now_frame,
+            transport,
+            transport_start_frame,
+            sample_rate,
+        ),
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(transparent)]
@@ -194,5 +257,116 @@ mod tests {
     fn duration_to_frames_rounds_up() {
         assert_eq!(frames_for_duration_ms(30_000, SAMPLE_RATE), 1_440_000);
         assert_eq!(frames_for_duration_ms(1, 44_100), 45);
+    }
+
+    fn t120() -> crate::Transport {
+        crate::Transport::new(120.0, crate::TimeSignature::FOUR_FOUR)
+    }
+
+    #[test]
+    fn resolve_trigger_frame_is_identity() {
+        assert_eq!(
+            resolve_trigger(ScheduleTrigger::Frame(12345), t120(), 0, 0, SAMPLE_RATE),
+            12345
+        );
+    }
+
+    #[test]
+    fn resolve_trigger_musical_time_at_120bpm_4_4() {
+        // bar 1 beat 0 tick 0 @ 120 BPM / 4-4 = 96000 frames from start
+        let f = resolve_trigger(
+            ScheduleTrigger::MusicalTime(MusicalTime::new(1, 0, 0)),
+            t120(),
+            0,
+            0,
+            SAMPLE_RATE,
+        );
+        assert_eq!(f, 96_000);
+    }
+
+    #[test]
+    fn resolve_trigger_relative_musical_advances_from_engine_now() {
+        // 16 bars @ 120 BPM = 32s = 1_536_000 frames
+        let engine_now = 100_000;
+        let f = resolve_trigger(
+            ScheduleTrigger::RelativeMusical { bars: 16, beats: 0 },
+            t120(),
+            engine_now,
+            0,
+            SAMPLE_RATE,
+        );
+        assert_eq!(f, engine_now + 1_536_000);
+    }
+
+    #[test]
+    fn resolve_trigger_next_bar_boundary_at_bar_returns_same_frame() {
+        // engine_now = 96000 (exact bar 1 boundary) → unchanged
+        let f = resolve_trigger(
+            ScheduleTrigger::NextBarBoundary,
+            t120(),
+            96_000,
+            0,
+            SAMPLE_RATE,
+        );
+        assert_eq!(f, 96_000);
+    }
+
+    #[test]
+    fn resolve_trigger_next_bar_boundary_mid_bar_rounds_up() {
+        let f = resolve_trigger(ScheduleTrigger::NextBarBoundary, t120(), 1, 0, SAMPLE_RATE);
+        assert_eq!(f, 96_000);
+    }
+
+    #[test]
+    fn resolve_trigger_next_beat_boundary_mid_beat_rounds_up() {
+        let f = resolve_trigger(ScheduleTrigger::NextBeatBoundary, t120(), 1, 0, SAMPLE_RATE);
+        // beat at 120 BPM is 24000 frames
+        assert_eq!(f, 24_000);
+    }
+
+    #[test]
+    fn lead_time_guard_uses_resolved_frame_for_planned_origins() {
+        // simulate a PlannedLlm scheduling via NextBarBoundary at
+        // engine_now = 0: next bar = 96_000 frames = 2 seconds, well
+        // under the 30s lead-time. Resolved frame is 96_000 → fails
+        // when fed into validate_schedule_request.
+        let resolved = resolve_trigger(ScheduleTrigger::NextBarBoundary, t120(), 0, 0, SAMPLE_RATE);
+        let err = validate_schedule_request(
+            ScheduledActionId::new("next-bar-too-soon"),
+            ActionOrigin::PlannedLlm,
+            ScheduleRequestTiming {
+                submitted_at_frame: 0,
+                trigger_frame: resolved,
+            },
+            SAMPLE_RATE,
+        )
+        .expect_err("next-bar trigger inside lead-time must be rejected");
+        assert!(matches!(
+            err,
+            ScheduleValidationError::PlannedActionTooSoon { .. }
+        ));
+    }
+
+    #[test]
+    fn relative_musical_at_30s_or_more_passes_lead_time_guard() {
+        // 30s @ 120 BPM 4-4 = 15 bars = 60 beats
+        let resolved = resolve_trigger(
+            ScheduleTrigger::RelativeMusical { bars: 15, beats: 0 },
+            t120(),
+            0,
+            0,
+            SAMPLE_RATE,
+        );
+        assert_eq!(resolved, 1_440_000);
+        let ok = validate_schedule_request(
+            ScheduledActionId::new("relative-ok"),
+            ActionOrigin::PlannedPi,
+            ScheduleRequestTiming {
+                submitted_at_frame: 0,
+                trigger_frame: resolved,
+            },
+            SAMPLE_RATE,
+        );
+        assert!(ok.is_ok());
     }
 }
