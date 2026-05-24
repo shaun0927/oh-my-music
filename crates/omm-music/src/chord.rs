@@ -85,6 +85,10 @@ impl Extension {
 }
 
 /// A chord — root pitch class, quality, and any extensions.
+///
+/// Duplicates in `extensions` are tolerated but deduplicated by
+/// `basic_voicing` so the resulting voicing never has repeated
+/// pitches.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Chord {
     pub root: PitchClass,
@@ -131,6 +135,7 @@ impl Chord {
             }
         }
         pitches.sort_by_key(|p| p.0);
+        pitches.dedup();
         Voicing { pitches }
     }
 }
@@ -234,6 +239,16 @@ mod tests {
         for i in 1..midis.len() {
             assert!(midis[i - 1] <= midis[i], "voicing not sorted: {midis:?}");
         }
+    }
+
+    #[test]
+    fn duplicate_extensions_are_deduplicated_in_voicing() {
+        let chord = Chord::new(PitchClass::C, ChordQuality::Maj7)
+            .with_extension(Extension::Nine)
+            .with_extension(Extension::Nine);
+        let v = chord.basic_voicing(4);
+        // C E G B + D5 (twice → once after dedup)
+        assert_eq!(voicing_midis(&v), vec![60, 64, 67, 71, 74]);
     }
 
     #[test]
