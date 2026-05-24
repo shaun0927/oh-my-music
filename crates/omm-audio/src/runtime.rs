@@ -265,6 +265,36 @@ impl AudioRuntime {
         Ok(())
     }
 
+    /// Add a sequencer-driven generated source. Returns the producer
+    /// end of a lock-free `NoteEventQueue` that the control side uses
+    /// to push `NoteEvent`s into the sequencer.
+    pub fn add_sequencer_source(
+        &mut self,
+        source_instance_id: SourceInstanceId,
+        voice_factory: crate::source::sequencer::SynthVoiceFactory,
+        polyphony: usize,
+    ) -> Result<crate::note_queue::NoteEventQueue, SourceInstanceError> {
+        let (queue, receiver) = crate::note_queue::new_note_channel();
+        let sequencer = crate::source::sequencer::SequencerSource::new(
+            receiver,
+            voice_factory,
+            self.transport,
+            self.sample_rate,
+            polyphony,
+        );
+        self.add_source_instance(
+            source_instance_id,
+            SourceKind::Generated,
+            Some(SourceAssetRef::Generated {
+                engine: omm_protocol::GeneratedEngine::Sequencer,
+                code_ref: None,
+            }),
+            SourceTimelinePlacement::always_on(),
+            Box::new(sequencer),
+        )?;
+        Ok(queue)
+    }
+
     pub fn set_source_instance_enabled(
         &mut self,
         source_instance_id: &SourceInstanceId,

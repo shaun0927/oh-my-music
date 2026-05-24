@@ -2,6 +2,7 @@ pub mod glicol;
 pub mod mic;
 pub mod musical_test;
 pub mod player;
+pub mod sequencer;
 pub mod synth;
 pub mod test_tone;
 
@@ -9,6 +10,7 @@ pub use glicol::GlicolSource;
 pub use mic::{MicSource, MicSourceError};
 pub use musical_test::MusicalTestSource;
 pub use player::{PlayerSource, PlayerSourceError};
+pub use sequencer::{SequencerSource, SynthVoiceFactory, DEFAULT_SEQUENCER_POLYPHONY};
 pub use synth::{midi_to_freq_hz, AdsrEnvelope, SawAdsrVoice, SineAdsrVoice, SynthVoice};
 pub use test_tone::TestToneSource;
 
