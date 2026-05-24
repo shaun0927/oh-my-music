@@ -1,6 +1,8 @@
 use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
 
+use omm_protocol::Transport;
+
 pub const RT_QUEUE_CAPACITY: usize = 1024;
 pub const MAX_DRAIN_PER_BLOCK: usize = 64;
 pub const RT_SOURCE_INSTANCE_ID_CAPACITY: usize = 128;
@@ -112,6 +114,14 @@ pub enum RtCommand {
     SetSourceInstanceReverse {
         source_instance_id: RtSourceInstanceId,
         reverse: bool,
+    },
+    /// Atomically replace the master Transport. Applied at the next
+    /// command drain point — i.e. before the next render block. Used
+    /// by both the dispatcher's SetTransport variant and any future
+    /// scheduled transport changes that need to land at a precise
+    /// frame.
+    SetMasterTransport {
+        transport: Transport,
     },
 }
 
@@ -305,7 +315,8 @@ mod tests {
                 | RtCommand::SetSourceInstanceEq { .. }
                 | RtCommand::SetSourceInstanceReverbSendDb { .. }
                 | RtCommand::SetSourceInstancePlaybackRate { .. }
-                | RtCommand::SetSourceInstanceReverse { .. } => {}
+                | RtCommand::SetSourceInstanceReverse { .. }
+                | RtCommand::SetMasterTransport { .. } => {}
             }
         }
 

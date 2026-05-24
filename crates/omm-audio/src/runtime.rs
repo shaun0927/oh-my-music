@@ -938,6 +938,9 @@ impl AudioRuntime {
             RtCommand::SetMasterHighpassHz { hz } => {
                 self.set_highpass_hz(hz);
             }
+            RtCommand::SetMasterTransport { transport } => {
+                self.set_transport(transport);
+            }
             RtCommand::SetSourceInstanceEnabled {
                 source_instance_id,
                 enabled,
