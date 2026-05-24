@@ -51,6 +51,7 @@ async fn main() -> anyhow::Result<()> {
         "timeline-demo" => run_timeline_demo()?,
         "mic-test" => run_mic_test().await?,
         "mic-monitor" => run_mic_monitor().await?,
+        "serve" => run_serve(args.get(2).cloned()).await?,
         unknown => {
             eprintln!("Unknown command: {unknown}");
             print_usage();
@@ -74,7 +75,8 @@ fn usage_text() -> String {
     text.push_str("  omm-engine multi-demo\n");
     text.push_str("  omm-engine timeline-demo\n");
     text.push_str("  omm-engine mic-test\n\n");
-    text.push_str("  omm-engine mic-monitor\n\n");
+    text.push_str("  omm-engine mic-monitor\n");
+    text.push_str("  omm-engine serve [socket-path]\n\n");
     text.push_str("Examples:\n");
     text.push_str("  omm-engine test-tone\n");
     text.push_str("  omm-engine glicol \"out: sin 440 >> mul 0.1\"\n");
@@ -495,6 +497,32 @@ async fn run_mic_monitor() -> anyhow::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+async fn run_serve(socket_path_arg: Option<String>) -> anyhow::Result<()> {
+    use omm_engine::ipc::{
+        default_socket_path, serve, spawn_audio_task, AudioTaskConfig, IpcServerConfig,
+    };
+    use std::path::PathBuf;
+
+    let socket_path = match socket_path_arg {
+        Some(p) => PathBuf::from(p),
+        None => default_socket_path(),
+    };
+    let (audio_tx, _audio_handle) = spawn_audio_task(AudioTaskConfig::default());
+    let server_cfg = IpcServerConfig {
+        socket_path: socket_path.clone(),
+        audio_tx,
+    };
+    println!("omm-engine serve: ready on {}", socket_path.display());
+    tokio::select! {
+        result = serve(server_cfg) => result?,
+        _ = tokio::signal::ctrl_c() => {
+            println!("Received Ctrl-C, shutting down.");
+        }
+    }
+    let _ = std::fs::remove_file(&socket_path);
     Ok(())
 }
 
