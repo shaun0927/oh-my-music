@@ -25,4 +25,4 @@ pub use progression::{generate_progression, ProgressionStyle};
 pub use quantize::{quantize_to_chord, quantize_to_scale};
 pub use scale::{Mode, Scale};
 pub use transform::{augment, humanize, invert, retrograde, transpose};
-pub use voicing::voice_leading;
+pub use voicing::{voice_leading, voice_leading_optimal, VoiceLeadingResult};
