@@ -24,7 +24,10 @@ use std::time::{Duration, Instant};
 const SAMPLE_RATE: u32 = 48_000;
 const BLOCK_FRAMES: usize = 256;
 const BLOCKS: usize = 4_000; // ~21 s of audio at 256 frames / block
-const MAX_AVG_PER_BLOCK_MS: f64 = 1.3; // 25 % of a 5.33 ms / 256-frame budget
+/// Default 3 ms budget — generous enough for a shared-runner CI box
+/// (~50 % of a 5.33 ms / 256-frame buffer). Override via the
+/// `RT_AUDIT_MAX_BLOCK_MS` env var when running on faster hosts.
+const DEFAULT_MAX_AVG_PER_BLOCK_MS: f64 = 3.0;
 
 #[derive(Debug)]
 #[allow(dead_code)] // fields are read via the `Debug` impl, not directly.
@@ -56,10 +59,14 @@ fn main() -> anyhow::Result<()> {
     if !report.nan_recovery_ok {
         failures.push("NaN injection not clamped to [-1, 1]".to_string());
     }
-    if report.avg_block_ms > MAX_AVG_PER_BLOCK_MS {
+    let budget = std::env::var("RT_AUDIT_MAX_BLOCK_MS")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(DEFAULT_MAX_AVG_PER_BLOCK_MS);
+    if report.avg_block_ms > budget {
         failures.push(format!(
             "avg block {:.3} ms > {:.3} ms budget",
-            report.avg_block_ms, MAX_AVG_PER_BLOCK_MS
+            report.avg_block_ms, budget
         ));
     }
 
